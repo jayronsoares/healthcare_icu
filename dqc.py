@@ -1,6 +1,8 @@
 
 """
-In this code, we define each data quality function and a load_data() function to load the dataset from a CSV file using pandas. We also define the main() function to run each data quality check on the dataset and print out the results to the console. The if __name__ == '__main__': block ensures that the main() function is only executed if the script is run directly, and not if it is imported as a module.
+In this code, we define each data quality function and a load_data() function to load the dataset from a CSV file using pandas. 
+We also define the main() function to run each data quality check on the dataset and print out the results to the console. 
+The if __name__ == '__main__': block ensures that the main() function is only executed if the script is run directly, and not if it is imported as a module.
 """
 import pandas as pd
 import numpy as np
