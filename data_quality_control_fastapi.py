@@ -2,11 +2,15 @@
 This example defines a FastAPI app and adds a single route at /data_quality_checks/ that expects a CSV file in the request body. 
 The app uses the run_data_quality_checks() function to run all the data quality checks on the uploaded data and returns a list of results as a JSON response. 
 You can send a POST request to the /data_quality_checks/ endpoint with a CSV file in the request body to perform the data quality checks.
+"""
 import pandas as pd
 from datetime import datetime
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Form
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 
 app = FastAPI()
+templates = Jinja2Templates(directory="templates")
 
 def check_accuracy(df):
     # Check for accuracy by ensuring that all data is within acceptable ranges
@@ -65,8 +69,13 @@ def run_data_quality_checks(df):
     results.append(check_uniqueness(df))
     return results
 
+@app.get("/", response_class=HTMLResponse)
+async def home(request: Request):
+    # Render home page template
+    return templates.TemplateResponse("index.html", {"request": request})
+
 @app.post("/data_quality_checks/")
-async def data_quality_checks(file: bytes):
+async def data_quality_checks(request: Request, file: bytes = Form(...)):
     # Load data and run data quality checks
     df = pd.read_csv(file)
     results = run_data_quality_checks(df)
@@ -76,6 +85,6 @@ async def data_quality_checks(file: bytes):
     for i, result in enumerate(results):
         response.append({'check_number': i+1, 'result': 'Passed' if result else 'Failed'})
     
-    return response
+    # Render results page template
+    return templates.TemplateResponse("results.html", {"request": request, "results": response})
 
-"""
