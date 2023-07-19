@@ -1,68 +1,111 @@
 import pandas as pd
-import xgboost as xgb
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.preprocessing import LabelEncoder
+from xgboost import XGBClassifier
 from bayes_opt import BayesianOptimization
 
-# Load the ICU patient data and select relevant features
-data = pd.read_csv("icu_patient_data.csv")
-# Choose relevant features
-relevant_features = ["age", "gender", "heart_rate", "respiratory_rate", "temperature", "systolic_bp", "diastolic_bp", "mean_bp", "spo2"]
-X = data[relevant_features]
-y = data["sepsis"]
+class SepsisPredictor:
+    def __init__(self):
+        self.selected_features = ["age", "gender", "heart_rate", "respiratory_rate", "systolic_bp", "diastolic_bp", "mean_bp", "spo2", "temperature", "urine_output", "wbc_count", "platelet_count", "glucose", "sodium", "potassium", "creatinine", "bun", "lactate", "albumin", "bnp", "pao2", "pco2", "ph", "bicarbonate", "blood_culture", "urine_culture", "ventilator", "central_line", "urinary_catheter"]
+        self.le = LabelEncoder()
+        self.xgb_model = None
 
-# Split the data into training and testing sets
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    def preprocess_data(self, data):
+        X = data[self.selected_features]
+        y = data["sepsis"]
+        X["gender"] = self.le.fit_transform(X["gender"])
+        X["ventilator"] = self.le.fit_transform(X["ventilator"])
+        X["central_line"] = self.le.fit_transform(X["central_line"])
+        X["urinary_catheter"] = self.le.fit_transform(X["urinary_catheter"])
+        X["blood_culture"] = X["blood_culture"].astype(int)
+        X["urine_culture"] = X["urine_culture"].astype(int)
+        return X, y
 
-# Define the hyperparameter search space for XGBoost
-param_space = {
-    "max_depth": (3, 10),
-    "gamma": (0, 1),
-    "subsample": (0.5, 1),
-    "colsample_bytree": (0.5, 1),
-    "learning_rate": (0.01, 0.1),
-    "n_estimators": (50, 1000)
-}
-
-# Define the objective function to optimize XGBoost hyperparameters using Bayesian optimization
-def objective_function(max_depth, gamma, subsample, colsample_bytree, learning_rate, n_estimators):
-    # Define the XGBoost model with the given hyperparameters
-    xgb_model = xgb.XGBClassifier(max_depth=int(max_depth),
-                                  gamma=gamma,
-                                  subsample=subsample,
-                                  colsample_bytree=colsample_bytree,
+    def train_model(self, X, y):
+        def xgb_cv(max_depth, learning_rate, n_estimators, gamma, min_child_weight, max_delta_step, subsample, colsample_bytree):
+            model = XGBClassifier(max_depth=int(max_depth),
                                   learning_rate=learning_rate,
                                   n_estimators=int(n_estimators),
-                                  random_state=42)
-    # Train the model and make predictions on the testing set
-    xgb_model.fit(X_train, y_train)
-    y_pred = xgb_model.predict(X_test)
-    # Calculate and return the accuracy score
-    accuracy = accuracy_score(y_test, y_pred)
-    return accuracy
+                                  gamma=gamma,
+                                  min_child_weight=min_child_weight,
+                                  max_delta_step=int(max_delta_step),
+                                  subsample=subsample,
+                                  colsample_bytree=colsample_bytree,
+                                  random_state=42,
+                                  tree_method='gpu_hist')
+            cv_result = XGBClassifier.cross_val_score(model, X, y, cv=5).mean()
+            return cv_result
 
-# Use Bayesian optimization to find the best hyperparameters for XGBoost
-optimizer = BayesianOptimization(f=objective_function, pbounds=param_space, random_state=42)
-optimizer.maximize(init_points=5, n_iter=20)
+        xgbBO = BayesianOptimization(f=xgb_cv, pbounds={'max_depth': (3, 20), 'learning_rate': (0.01, 0.3), 'n_estimators': (100, 1000), 'gamma': (0, 1), 'min_child_weight': (1, 10), 'max_delta_step': (0, 10), 'subsample': (0.5, 1), 'colsample_bytree': (0.5, 1)})
+        xgbBO.maximize(n_iter=10, init_points=10)
 
-# Define a function that takes patient data as input and returns an outcome (sepsis or not)
-def predict_sepsis(patient_data):
-    # Preprocess the patient data (e.g., one-hot encoding, scaling) and select relevant features
-    patient_data = pd.DataFrame(patient_data, columns=relevant_features)
-    patient_data = pd.get_dummies(patient_data)
-    patient_data = (patient_data - X.mean()) / X.std()
-    patient_data = patient_data.fillna(0) # Replace missing values with 0
-    patient_data = patient_data[X.columns] # Keep only relevant features
-    # Load the best hyperparameters found by Bayesian optimization and train an XGBoost model
-    best_params = optimizer.max["params"]
-    xgb_model = xgb.XGBClassifier(max_depth=int(best_params["max_depth"]),
-                                  gamma=best_params["gamma"],
-                                  subsample=best_params["subsample"],
-                                  colsample_bytree=best_params["colsample_bytree"],
-                                  learning_rate=best_params["learning_rate"],
-                                  n_estimators=int(best_params["n_estimators"]),
-                                  random_state=42)
-    xgb_model.fit(X, y)
-    # Make predictions on the patient data and return the outcome (sepsis or not)
-    prediction = xgb_model.predict(patient_data)
-    return "Sepsis"
+        # Get the optimal hyperparameters
+        params = xgbBO.max['params']
+        params['max_depth'] = int(params['max_depth'])
+        params['n_estimators'] = int(params['n_estimators'])
+        params['max_delta_step'] = int(params['max_delta_step'])
+
+        # Train the final model with the optimal hyperparameters
+        self.xgb_model = XGBClassifier(**params, tree_method='gpu_hist')
+        self.xgb_model.fit(X, y)
+
+    def predict_sepsis(self, patient_data):
+        patient_data = pd.DataFrame(patient_data, index=[0], columns=self.selected_features)
+        patient_data["gender"] = self.le.transform(patient_data["gender"])
+        patient_data["ventilator"] = self.le.transform(patient_data["ventilator"])
+        patient_data["central_line"] = self.le.transform(patient_data["central_line"])
+        patient_data["urinary_catheter"] = self.le.transform(patient_data["urinary_catheter"])
+        patient_data["blood_culture"] = patient_data["blood_culture"].astype(int)
+        patient_data["urine_culture"] = patient_data["urine_culture"].astype(int)
+        pred = self.xgb_model.predict(patient_data)[0]
+        if pred == 1:
+            return "Sepsis detected."
+        else:
+            return "Sepsis not detected."
+
+
+# Example usage
+if __name__ == "__main__":
+    # 1. Data Collection and Preprocessing
+    data = pd.read_csv("icu_patient_data.csv")
+    data = data.dropna()
+
+    predictor = SepsisPredictor()
+    X, y = predictor.preprocess_data(data)
+
+    # 2. Model Training
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    predictor.train_model(X_train, y_train)
+
+    # 3. Model Deployment
+    patient_data = {
+        "age": 60,
+        "gender": "Female",
+        "heart_rate": 80,
+        "respiratory_rate": 18,
+        "systolic_bp": 120,
+        # Include other relevant patient data based on ICU standard protocols
+        "urine_output": 1000,
+        "wbc_count": 12000,
+        "platelet_count": 250000,
+        "glucose": 120,
+        "sodium": 140,
+        "potassium": 4.5,
+        "creatinine": 0.9,
+        "bun": 20,
+        "lactate": 2.0,
+        "albumin": 3.5,
+        "bnp": 100,
+        "pao2": 80,
+        "pco2": 40,
+        "ph": 7.4,
+        "bicarbonate": 25,
+        "blood_culture": 1,
+        "urine_culture": 1,
+        "ventilator": "Yes",
+        "central_line": "No",
+        "urinary_catheter": "Yes"
+    }
+
+    outcome = predictor.predict_sepsis(patient_data)
+    print(outcome)
