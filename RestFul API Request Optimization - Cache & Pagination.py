@@ -47,10 +47,6 @@
     - If the schemas of the API dataframe and CSV dataframe are identical, the data is concatenated and loaded directly into the target table.
     - If the schemas are different, the data is loaded into staging tables separately.
 
-Please note that you will need to provide the appropriate database connection parameters (`username`, `password`, and `database`) in the `create_engine` function to establish a connection with your PostgreSQL data warehouse.
-
-Feel free to adapt and customize the code according to your specific requirements and data processing pipeline.
-
 """
 
 
