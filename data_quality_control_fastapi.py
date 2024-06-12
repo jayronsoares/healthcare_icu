@@ -1,7 +1,5 @@
 """
 This example defines a FastAPI app and adds a single route at /data_quality_checks/ that expects a CSV file in the request body. 
-The app uses the run_data_quality_checks() function to run all the data quality checks on the uploaded data and returns a list of results as a JSON response. 
-You can send a POST request to the /data_quality_checks/ endpoint with a CSV file in the request body to perform the data quality checks.
 """
 import pandas as pd
 from datetime import datetime
